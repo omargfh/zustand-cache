@@ -21,11 +21,14 @@ interface Store {
 interface Stores {
   [key: string]: Store;
 }
+interface Statistics {
+  hits: number;
+  misses: number;
+}
 export interface CacheStore {
   stores: Stores;
   globalPolicy: Policy;
   invalidate: (store: string, key: string) => boolean; // returns true if key was invalidated
-  invalidateIfExpired: (store: string, key: string) => boolean; // returns true if key was invalidated
   invalidateAll: (store: string) => boolean; // returns true if store was invalidated
   invalidateAllOrThrow: (store: string) => void; // throws if store was not invalidated
   invalidateAllStores: () => void; // invalidates all stores
@@ -38,6 +41,9 @@ export interface CacheStore {
   setGlobalPolicy: (policy: Partial<Policy>) => void; // sets the global policy
   setStorePolicy: (store: string, policy: Partial<Policy>) => void; // sets the policy of the store
   _debug: () => void; // logs the current state
+  _debugStatistics: Statistics;
+  _incrementHits: () => void;
+  _incrementMisses: () => void;
 }
 
 export const useCacheStore = create(
@@ -52,22 +58,16 @@ export const useCacheStore = create(
       invalidate: (store: string, key: string) => {
         const storeInstance = get().stores[store] as Store;
         if (!storeInstance) return false;
+        if (!storeInstance.cached[key]) return false;
         if (storeInstance.policy.invalidationPolicy === "never") return false;
-        delete storeInstance.cached[key];
+
+        set(
+          produce((state) => {
+            delete state.stores[store].cached[key];
+          })
+        );
+
         return true;
-      },
-      invalidateIfExpired: (store: string, key: string) => {
-        const storeInstance = get().stores[store] as Store;
-        if (!storeInstance) return false;
-        if (storeInstance.policy.invalidationPolicy === "never") return false;
-        if (
-          storeInstance.cached[key]?.assignedAt + storeInstance.policy.expiry <
-          Date.now()
-        ) {
-          delete storeInstance.cached[key];
-          return true;
-        }
-        return false;
       },
       invalidateAll: (store: string) => {
         const storeInstance = get().stores[store] as Store;
@@ -100,7 +100,11 @@ export const useCacheStore = create(
           storeInstance.cached[key].assignedAt + storeInstance.policy.expiry <
           Date.now()
         ) {
-          delete storeInstance.cached[key];
+          set(
+            produce((state) => {
+              delete state.stores[store].cached[key];
+            })
+          );
         }
       },
       pruneAll: (store: string) => {
@@ -126,7 +130,14 @@ export const useCacheStore = create(
         }
         const prune = get().prune;
         prune(store, key);
-        return storeInstance.cached[key]?.value;
+        const value = storeInstance.cached[key]?.value;
+        if (value) {
+          get()._incrementHits();
+        } else {
+          get()._incrementMisses();
+        }
+        console.log(get()._debugStatistics);
+        return value;
       },
       createStore(store, policy) {
         if (get().stores[store]) return;
@@ -176,6 +187,25 @@ export const useCacheStore = create(
       _debug() {
         console.log(get());
       },
+      _debugStatistics: {
+        hits: 0,
+        misses: 0,
+        invalidationsDueToExpiry: 0,
+      },
+      _incrementHits() {
+        set(
+          produce((state) => {
+            state._debugStatistics.hits++;
+          })
+        );
+      },
+      _incrementMisses() {
+        set(
+          produce((state) => {
+            state._debugStatistics.misses++;
+          })
+        );
+      },
     }),
     {
       name: "cache",
@@ -183,7 +213,7 @@ export const useCacheStore = create(
   )
 );
 
-useCacheStore.persist.onFinishHydration((state) => {
+useCacheStore.persist?.onFinishHydration((state) => {
   if (!state) return;
   if (state?.globalPolicy.pruneOnSessionStart) {
     state.pruneAllStores();
