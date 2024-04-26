@@ -184,6 +184,7 @@ export const useCacheStore = create(
           })
         );
       },
+
       _debug() {
         console.log(get());
       },
@@ -212,6 +213,18 @@ export const useCacheStore = create(
     }
   )
 );
+
+export function useSubscribeToCacheStore(store: string, key: string) {
+  const state = useCacheStore.getState();
+  const storeInstance = state.stores[store] as Store;
+  if (!storeInstance) {
+    state.createStore(store, {});
+  }
+  if (!storeInstance.cached[key]) {
+    state.setValue(store, key, null);
+  }
+  return useCacheStore((state: CacheStore) => state.stores[store].cached[key]);
+}
 
 useCacheStore.persist?.onFinishHydration((state) => {
   if (!state) return;
