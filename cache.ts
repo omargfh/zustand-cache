@@ -226,6 +226,17 @@ export function useSubscribeToCacheStore(store: string, key: string) {
   return useCacheStore((state: CacheStore) => state.stores[store].cached[key]);
 }
 
+export function useCache<T>(
+  store: string,
+  key: string
+): [T | null, (value: T) => void] {
+  return [
+    useCacheStore((state: CacheStore) => state.getValue(store, key)),
+    (value: any) =>
+      useCacheStore((state: CacheStore) => state.setValue(store, key, value)),
+  ];
+}  // Only use this technically
+
 useCacheStore.persist?.onFinishHydration((state) => {
   if (!state) return;
   if (state?.globalPolicy.pruneOnSessionStart) {
